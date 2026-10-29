@@ -42,6 +42,7 @@ function Icon({ name }: { name: string }) {
 }
 
 function PositionTable({ tick, compact = false }: { tick: number; compact?: boolean }) {
+  const totalValue = positions.reduce((sum, position) => sum + assetPrice(position, tick) * position.quantity, 0)
   return (
     <div className="table-wrap">
       <table className="positions-table">
@@ -52,6 +53,7 @@ function PositionTable({ tick, compact = false }: { tick: number; compact?: bool
           {positions.map((position, index) => {
             const price = assetPrice(position, tick)
             const value = price * position.quantity
+            const weight = value / totalValue
             const change = Math.sin(tick * 0.52 + index) * 1.24 + [1.42, -0.38, 2.16][index]
             return (
               <tr key={position.symbol}>
@@ -64,7 +66,7 @@ function PositionTable({ tick, compact = false }: { tick: number; compact?: bool
                 <td className="numeric-cell">{currency.format(price)}</td>
                 <td className="numeric-cell">{number.format(position.quantity)} {position.symbol}</td>
                 <td className="numeric-cell">{currency.format(value)}</td>
-                <td><div className="weight-cell"><span>{percent.format(position.weight)}</span><span className="weight-track"><i style={{ width: `${position.weight * 100}%`, background: position.color }} /></span></div></td>
+                <td><div className="weight-cell"><span>{percent.format(weight)}</span><span className="weight-track"><i style={{ width: `${weight * 100}%`, background: position.color }} /></span></div></td>
                 <td className={change >= 0 ? 'positive-cell' : 'negative-cell'}>{change >= 0 ? '+' : ''}{number.format(change)}%</td>
               </tr>
             )
@@ -94,7 +96,7 @@ function RiskSummary({ result, portfolioValue, compact = false }: { result: Risk
   )
 }
 
-function EquityPanel({ range, setRange, tick }: { range: string; setRange: (value: string) => void; tick: number }) {
+function EquityPanel({ range, setRange, tick, portfolioValue }: { range: string; setRange: (value: string) => void; tick: number; portfolioValue: number }) {
   return (
     <section className="panel equity-panel">
       <div className="panel-heading equity-heading">
@@ -103,20 +105,21 @@ function EquityPanel({ range, setRange, tick }: { range: string; setRange: (valu
           {['1H', '1D', '1W', '1M'].map((item) => <button key={item} className={range === item ? 'selected' : ''} onClick={() => setRange(item)}>{item}</button>)}
         </div>
       </div>
-      <div className="chart-value-line"><strong>Rp 2,27 M</strong><span className="positive-cell">+2,84% <small>periode ini</small></span></div>
+      <div className="chart-value-line"><strong>{currency.format(portfolioValue)}</strong><span className="chart-demo-caption">Kurva sintetis <small>· ilustratif</small></span></div>
       <EquityChart range={range} tick={tick} />
     </section>
   )
 }
 
 function PortfolioPage({ tick, portfolioValue }: { tick: number; portfolioValue: number }) {
+  const largestWeight = Math.max(...positions.map((position) => assetPrice(position, tick) * position.quantity / portfolioValue))
   return (
     <div className="page-stack">
       <div className="page-intro"><div><span className="eyebrow">ALOKASI ASET</span><h2>Portofolio demo</h2><p>Posisi contoh yang diperbarui menggunakan pergerakan sintetis.</p></div><span className="demo-chip">PAPER DATA</span></div>
       <div className="metrics-grid three-metrics">
-        <MetricCard label="Nilai portofolio" value={currency.format(portfolioValue)} change="+2,84% hari ini" tone="positive" icon={<Icon name="↗" />} />
+        <MetricCard label="Nilai portofolio" value={currency.format(portfolioValue)} change="Data sintetis" tone="positive" icon={<Icon name="↗" />} />
         <MetricCard label="Jumlah aset" value="3" hint="Instrumen demo" tone="violet" icon={<Icon name="◈" />} />
-        <MetricCard label="Konsentrasi terbesar" value="65,0%" hint="BTC · bobot simulasi" tone="neutral" icon={<Icon name="◎" />} />
+        <MetricCard label="Konsentrasi terbesar" value={percent.format(largestWeight)} hint="BTC · bobot simulasi" tone="neutral" icon={<Icon name="◎" />} />
       </div>
       <section className="panel table-panel">
         <div className="panel-heading"><div><span className="eyebrow">POSISI SAAT INI</span><h2>Komposisi aset</h2></div><span className="tiny-status"><i /> Sintetis</span></div>
@@ -195,12 +198,12 @@ export default function App() {
   }, [])
 
   const portfolioValue = positions.reduce((sum, position) => sum + assetPrice(position, tick) * position.quantity, 0)
-  const riskResult = useMemo(() => simulateRisk(positions, portfolioValue, {
+  const riskResult = useMemo(() => simulateRisk(positions.map((position) => ({ ...position, weight: assetPrice(position, tick) * position.quantity / portfolioValue })), portfolioValue, {
     confidence,
     horizonDays: horizon,
     scenarios,
     seed: 7_421 + runId,
-  }), [confidence, horizon, scenarios, portfolioValue, runId])
+  }), [confidence, horizon, scenarios, portfolioValue, runId, tick])
 
   const runSimulation = () => {
     setIsRunning(true)
@@ -238,13 +241,13 @@ export default function App() {
 
           {page === 'overview' && <div className="page-stack">
             <div className="metrics-grid">
-              <MetricCard label="Nilai portofolio" value={currency.format(portfolioValue)} change="+2,84% hari ini" tone="positive" icon={<Icon name="↗" />} hint="Equity simulasi" />
+              <MetricCard label="Nilai portofolio" value={currency.format(portfolioValue)} change="Data sintetis" tone="positive" icon={<Icon name="↗" />} hint="Equity simulasi" />
               <MetricCard label={`VaR ${Math.round(riskResult.confidence * 100)}% · ${riskResult.horizonDays} hari`} value={currency.format(riskResult.var)} change="Risiko ekor" tone="negative" icon={<Icon name="⌁" />} hint="Metode Monte Carlo" />
               <MetricCard label={`CVaR ${Math.round(riskResult.confidence * 100)}%`} value={currency.format(riskResult.cvar)} change="Expected shortfall" tone="violet" icon={<Icon name="⌄" />} hint="Rata-rata tail loss" />
-              <MetricCard label="Volatilitas tahunan" value="46,8%" change="+1,2% vs kemarin" tone="neutral" icon={<Icon name="∿" />} hint="Estimasi sintetis" />
+              <MetricCard label="Vol. tahunan (aproks.)" value={percent.format(riskResult.volatility * Math.sqrt(252 / riskResult.horizonDays))} tone="neutral" icon={<Icon name="∿" />} hint="√waktu · 252 hari" />
             </div>
             <div className="dashboard-grid">
-              <EquityPanel range={range} setRange={setRange} tick={tick} />
+              <EquityPanel range={range} setRange={setRange} tick={tick} portfolioValue={portfolioValue} />
               <RiskSummary result={riskResult} portfolioValue={portfolioValue} compact />
             </div>
             <section className="panel table-panel overview-table">
