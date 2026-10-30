@@ -10,6 +10,7 @@ MVP dashboard risiko portofolio yang berjalan di browser menggunakan data sintet
 - Grafik ekuitas dan tabel posisi demo untuk BTC, ETH, dan SOL.
 - Simulasi Monte Carlo berbasis GBM sederhana dengan kejutan pasar bersama dan kejutan idiosinkratik.
 - VaR dan CVaR pada tingkat kepercayaan 95% atau 99%, horizon 1, 5, atau 10 hari, serta 2.500, 10.000, atau 25.000 skenario.
+- Stress test dengan preset risk-off, crypto winter, relief rally, dan shock kustom per aset; hasil P&L dapat diekspor ke CSV.
 - Histogram distribusi hasil, pratinjau wireframe volatilitas ilustratif, dan panel status modul.
 - Kontrol eksekusi yang sengaja dinonaktifkan. Tidak ada koneksi exchange, API key, stream pasar, atau jalur pengiriman order.
 - Tata letak responsif dan antarmuka dalam bahasa Indonesia.
@@ -38,6 +39,7 @@ Data demo menggunakan tiga posisi contoh dan harga IDR yang dibuat di sisi brows
 - **VaR**: kuantil kerugian pada tingkat kepercayaan terpilih untuk horizon simulasi.
 - **CVaR / Expected Shortfall**: rata-rata kerugian pada bagian distribusi yang lebih buruk dari kuantil VaR.
 - Seed awal membuat keluaran dapat direproduksi. Tombol “Jalankan simulasi” mengganti seed agar hasil berubah tetapi tetap deterministik untuk seed baru tersebut.
+- Stress test menerapkan persentase shock langsung ke nilai posisi spot dan merinci dampak per aset. Ini adalah *linear repricing* hipotetis; korelasi, likuiditas, slippage, pajak, dan derivatif tidak dimodelkan.
 
 Ini adalah demonstrasi edukatif, bukan model risiko yang telah divalidasi. Asumsi distribusi normal, korelasi sederhana, dan input volatilitas tetap tidak menggambarkan perilaku pasar secara lengkap; model juga tidak memasukkan likuiditas, biaya, lonjakan volatilitas, atau risiko operasional.
 
@@ -50,7 +52,9 @@ src/
 │   ├── Charts.tsx          # grafik SVG sintetis
 │   └── MetricCard.tsx      # kartu metrik yang dapat digunakan ulang
 ├── lib/risk.ts             # generator simulasi, VaR/CVaR, histogram
+├── lib/stress.ts           # kalkulasi shock harga dan ekspor hasil CSV
 ├── test/risk.test.ts       # tes mesin risiko
+├── test/stress.test.ts     # tes stress test dan format CSV
 ├── index.css               # tema dan tata letak responsif
 └── main.tsx                # entry point React
 ```
