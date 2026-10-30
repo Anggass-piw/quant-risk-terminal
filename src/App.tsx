@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { EquityChart, RiskHistogram, VolatilitySurface } from './components/Charts'
 import { MetricCard } from './components/MetricCard'
 import { simulateRisk, type RiskAsset, type RiskResult } from './lib/risk'
+import { calculateStressTest, formatStressCsv } from './lib/stress'
 
-type Page = 'overview' | 'portfolio' | 'simulation' | 'models'
+type Page = 'overview' | 'portfolio' | 'simulation' | 'stress' | 'models'
 type Position = RiskAsset & {
   name: string
   quantity: number
@@ -24,7 +25,14 @@ const navItems: { id: Page; title: string; icon: string }[] = [
   { id: 'overview', title: 'Ikhtisar', icon: '◫' },
   { id: 'portfolio', title: 'Portofolio', icon: '▤' },
   { id: 'simulation', title: 'Simulasi Risiko', icon: '⌁' },
+  { id: 'stress', title: 'Stress Test', icon: '⚡' },
   { id: 'models', title: 'Lab Model', icon: '◈' },
+]
+
+const stressScenarios: { id: string; name: string; description: string; shocks: Record<string, number> }[] = [
+  { id: 'risk-off', name: 'Risk-off', description: 'Koreksi pasar serentak', shocks: { BTC: -20, ETH: -30, SOL: -40 } },
+  { id: 'crypto-winter', name: 'Crypto winter', description: 'Drawdown ekstrem aset kripto', shocks: { BTC: -50, ETH: -60, SOL: -70 } },
+  { id: 'relief-rally', name: 'Relief rally', description: 'Skenario pemulihan harga', shocks: { BTC: 15, ETH: 25, SOL: 35 } },
 ]
 
 const currency = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 })
@@ -162,6 +170,90 @@ function SimulationPage({ result, portfolioValue, confidence, setConfidence, hor
   )
 }
 
+function StressPage({ tick }: { tick: number }) {
+  const [selectedScenario, setSelectedScenario] = useState('risk-off')
+  const [shockValues, setShockValues] = useState<Record<string, number>>({ ...stressScenarios[0].shocks })
+  const stressPositions = positions.map((position) => ({
+    symbol: position.symbol,
+    name: position.name,
+    quantity: position.quantity,
+    price: assetPrice(position, tick),
+    color: position.color,
+  }))
+  const result = calculateStressTest(stressPositions, stressPositions.map((position) => ({
+    symbol: position.symbol,
+    percent: shockValues[position.symbol] ?? 0,
+  })))
+  const scenarioName = stressScenarios.find((scenario) => scenario.id === selectedScenario)?.name ?? 'Shock kustom'
+
+  const applyPreset = (scenario: typeof stressScenarios[number]) => {
+    setSelectedScenario(scenario.id)
+    setShockValues({ ...scenario.shocks })
+  }
+  const updateShock = (symbol: string, value: number) => {
+    if (!Number.isFinite(value)) return
+    setSelectedScenario('custom')
+    setShockValues((current) => ({ ...current, [symbol]: Math.max(-100, Math.min(100, value)) }))
+  }
+  const exportCsv = () => {
+    const blob = new Blob([formatStressCsv(result, scenarioName)], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'quant-risk-stress-test.csv'
+    document.body.append(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
+
+  return (
+    <div className="page-stack">
+      <div className="page-intro"><div><span className="eyebrow">SCENARIO ANALYSIS · SPOT SHOCK</span><h2>Stress test portofolio</h2><p>Ukur dampak perubahan harga hipotetis terhadap setiap posisi.</p></div><button className="primary-button" onClick={exportCsv}>↓  Ekspor CSV</button></div>
+      <section className="scenario-grid" aria-label="Preset skenario stress">
+        {stressScenarios.map((scenario) => <button key={scenario.id} className={`scenario-card ${selectedScenario === scenario.id ? 'selected' : ''}`} onClick={() => applyPreset(scenario)}>
+          <strong>{scenario.name}</strong><span>{scenario.description}</span><small>BTC {scenario.shocks.BTC > 0 ? '+' : ''}{scenario.shocks.BTC}% · ETH {scenario.shocks.ETH > 0 ? '+' : ''}{scenario.shocks.ETH}% · SOL {scenario.shocks.SOL > 0 ? '+' : ''}{scenario.shocks.SOL}%</small>
+        </button>)}
+        <button className={`scenario-card ${selectedScenario === 'custom' ? 'selected' : ''}`} onClick={() => { setSelectedScenario('custom'); setShockValues(Object.fromEntries(positions.map((position) => [position.symbol, 0]))) }}>
+          <strong>Shock kustom</strong><span>Tentukan perubahan tiap aset</span><small>Atur sendiri · −100% hingga +100%</small>
+        </button>
+      </section>
+      <section className="panel shock-panel">
+        <div className="panel-heading"><div><span className="eyebrow">ASUMSI HARGA</span><h2>Shock per aset</h2></div><span className="tiny-status"><i /> {scenarioName}</span></div>
+        <div className="shock-grid">{stressPositions.map((position) => {
+          const value = shockValues[position.symbol] ?? 0
+          return <div className="shock-control" key={position.symbol}>
+            <div className="shock-control-heading"><span className="asset-cell"><span className="coin-mark" style={{ color: position.color, background: `${position.color}18` }}>{position.symbol.slice(0, 1)}</span><span><strong>{position.name}</strong><small>{position.symbol} · spot demo</small></span></span><label className="shock-input-wrap"><input type="number" min="-100" max="100" step="1" value={value} aria-label={`${position.symbol} shock dalam persen`} onChange={(event) => updateShock(position.symbol, Number(event.target.value))} /><span>%</span></label></div>
+            <input className="shock-slider" type="range" min="-100" max="100" step="1" value={value} aria-label={`Atur shock ${position.symbol}`} onChange={(event) => updateShock(position.symbol, Number(event.target.value))} />
+            <div className="shock-scale"><span>−100%</span><span>0%</span><span>+100%</span></div>
+          </div>
+        })}</div>
+      </section>
+      <div className="metrics-grid stress-metrics">
+        <MetricCard label="Nilai sebelum shock" value={currency.format(result.currentValue)} hint="Posisi demo saat ini" tone="neutral" icon={<Icon name="◎" />} />
+        <MetricCard label="Nilai setelah shock" value={currency.format(result.stressedValue)} hint={scenarioName} tone="violet" icon={<Icon name="↗" />} />
+        <MetricCard label="Dampak P&L" value={`${result.pnl > 0 ? '+' : ''}${currency.format(result.pnl)}`} change={result.pnl >= 0 ? 'Skenario positif' : 'Skenario negatif'} hint={`${result.changePercent > 0 ? '+' : ''}${number.format(result.changePercent)}% dari nilai awal`} tone={result.pnl >= 0 ? 'positive' : 'negative'} icon={<Icon name={result.pnl >= 0 ? '↗' : '↘'} />} />
+      </div>
+      <section className="panel table-panel stress-results-panel">
+        <div className="panel-heading"><div><span className="eyebrow">HASIL PER POSISI</span><h2>Rincian dampak skenario</h2></div><span className="table-caption">Linear repricing · IDR</span></div>
+        <div className="table-wrap"><table className="positions-table stress-table">
+          <thead><tr><th>Aset</th><th>Shock</th><th>Nilai awal</th><th>Nilai setelah shock</th><th>P&amp;L</th><th>Kontribusi</th></tr></thead>
+          <tbody>{result.rows.map((row) => <tr key={row.symbol}>
+            <td><div className="asset-cell"><span className="coin-mark" style={{ color: stressPositions.find((position) => position.symbol === row.symbol)?.color }}>{row.symbol.slice(0, 1)}</span><span><strong>{row.name}</strong><small>{row.symbol} · spot demo</small></span></div></td>
+            <td className={row.shockPercent >= 0 ? 'positive-cell' : 'negative-cell'}>{row.shockPercent > 0 ? '+' : ''}{number.format(row.shockPercent)}%</td>
+            <td className="numeric-cell">{currency.format(row.currentValue)}</td>
+            <td className="numeric-cell">{currency.format(row.stressedValue)}</td>
+            <td className={row.pnl >= 0 ? 'positive-cell' : 'negative-cell'}>{row.pnl > 0 ? '+' : ''}{currency.format(row.pnl)}</td>
+            <td className={row.portfolioImpactPercent >= 0 ? 'positive-cell' : 'negative-cell'}>{row.portfolioImpactPercent > 0 ? '+' : ''}{number.format(row.portfolioImpactPercent)}%</td>
+          </tr>)}</tbody>
+          <tfoot><tr><th>TOTAL</th><td>—</td><td>{currency.format(result.currentValue)}</td><td>{currency.format(result.stressedValue)}</td><td className={result.pnl >= 0 ? 'positive-cell' : 'negative-cell'}>{result.pnl > 0 ? '+' : ''}{currency.format(result.pnl)}</td><td className={result.changePercent >= 0 ? 'positive-cell' : 'negative-cell'}>{result.changePercent > 0 ? '+' : ''}{number.format(result.changePercent)}%</td></tr></tfoot>
+        </table></div>
+      </section>
+      <div className="panel-note"><strong>Batasan model:</strong> Shock diterapkan langsung pada nilai posisi spot (linear repricing). Analisis ini tidak memperhitungkan korelasi, likuiditas, slippage, pajak, atau instrumen derivatif. Seluruh harga dan hasil bersifat sintetis, bukan prediksi maupun rekomendasi investasi.</div>
+    </div>
+  )
+}
+
 function ModelPage() {
   return (
     <div className="page-stack">
@@ -237,7 +329,7 @@ export default function App() {
       <main className="main-area">
         <header className="topbar"><div className="breadcrumb"><span>Workspace</span><i>/</i><strong>{title}</strong></div><div className="topbar-actions"><span className="feed-status"><i /> DATA SIMULASI</span><span className="updated-label">Update {latest}</span><button className="icon-button" aria-label="Notifikasi">♧<span /></button><div className="top-avatar">AP</div></div></header>
         <div className="content-area">
-          <div className="page-header"><div><div className="page-kicker"><span className="pulse-dot" />ENVIRONMENT: SIMULATED</div><h1>{page === 'overview' ? 'Terminal risiko kuantitatif' : title}</h1><p>{page === 'overview' ? 'Ringkasan risiko dan eksekusi portofolio dalam lingkungan simulasi.' : page === 'portfolio' ? 'Pantau komposisi dan eksposur aset sintetis.' : page === 'simulation' ? 'Uji skenario pasar dan ukur risiko ekor portofolio.' : 'Eksplorasi wireframe volatilitas dan status modul analitik.'}</p></div><div className="header-actions"><span className="session-label"><span /> SANDBOX</span><button className="secondary-button" onClick={() => setPage('simulation')}>＋ <span>Skenario baru</span></button></div></div>
+          <div className="page-header"><div><div className="page-kicker"><span className="pulse-dot" />ENVIRONMENT: SIMULATED</div><h1>{page === 'overview' ? 'Terminal risiko kuantitatif' : title}</h1><p>{page === 'overview' ? 'Ringkasan risiko dan eksekusi portofolio dalam lingkungan simulasi.' : page === 'portfolio' ? 'Pantau komposisi dan eksposur aset sintetis.' : page === 'simulation' ? 'Uji skenario pasar dan ukur risiko ekor portofolio.' : page === 'stress' ? 'Ukur dampak shock harga hipotetis pada posisi portofolio.' : 'Eksplorasi wireframe volatilitas dan status modul analitik.'}</p></div><div className="header-actions"><span className="session-label"><span /> SANDBOX</span><button className="secondary-button" onClick={() => setPage('simulation')}>＋ <span>Skenario baru</span></button></div></div>
 
           {page === 'overview' && <div className="page-stack">
             <div className="metrics-grid">
@@ -263,6 +355,7 @@ export default function App() {
 
           {page === 'portfolio' && <PortfolioPage tick={tick} portfolioValue={portfolioValue} />}
           {page === 'simulation' && <SimulationPage result={riskResult} portfolioValue={portfolioValue} confidence={confidence} setConfidence={setConfidence} horizon={horizon} setHorizon={setHorizon} scenarios={scenarios} setScenarios={setScenarios} runSimulation={runSimulation} isRunning={isRunning} />}
+          {page === 'stress' && <StressPage tick={tick} />}
           {page === 'models' && <ModelPage />}
         </div>
       </main>
